@@ -1,0 +1,16 @@
+packages:
+  - apps/*
+  - libs/*
+
+# Copy workspace deps into node_modules instead of symlinking so `pnpm deploy`
+# produces a self-contained production bundle for each app image.
+injectWorkspacePackages: true
+
+# Dependency install scripts are denied unless listed here explicitly.
+allowBuilds:
+  '@parcel/watcher': false
+  '@swc/core': false
+  cpu-features: false
+  protobufjs: false
+  ssh2: false
+  unrs-resolver: false

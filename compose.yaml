@@ -1,0 +1,174 @@
+# Surge: full stack on a single host.
+#   cp .env.example .env && docker compose up -d --build
+name: surge
+
+x-node-service: &node-service
+  restart: unless-stopped
+  init: true
+  stop_grace_period: 30s
+  logging:
+    driver: json-file
+    options: { max-size: '20m', max-file: '5' }
+
+x-app-env: &app-env
+  NODE_ENV: production
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
+  REDIS_URL: redis://redis:6379
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_traceidratio}
+  OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-0.1}
+
+services:
+  nginx:
+    image: nginx:1.30.5-alpine
+    restart: unless-stopped
+    ports: ['${HTTP_PORT:-8080}:80']
+    volumes: ['./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro']
+    ulimits:
+      nofile: { soft: 65535, hard: 65535 }
+    depends_on:
+      booking-api: { condition: service_healthy }
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1/nginx-health']
+      interval: 10s
+      timeout: 2s
+      retries: 3
+
+  booking-api:
+    <<: *node-service
+    build: { context: ., target: runtime, args: { APP: booking-api } }
+    image: surge/booking-api:${IMAGE_TAG:-local}
+    environment:
+      <<: *app-env
+      SERVICE_NAME: booking-api
+      NODE_OPTIONS: --max-old-space-size=${BOOKING_API_HEAP_MB:-256}
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      pgbouncer: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    deploy:
+      replicas: ${BOOKING_API_REPLICAS:-1}
+      resources:
+        limits: { cpus: '1.0', memory: '${BOOKING_API_MEMORY:-384M}' }
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/health/ready').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+      interval: 5s
+      timeout: 2s
+      retries: 3
+      start_period: 10s
+
+  migrate:
+    build: { context: ., target: migrator }
+    image: surge/migrator:${IMAGE_TAG:-local}
+    # Migrations take a session-level advisory lock, which PgBouncer's
+    # transaction mode cannot provide, so they connect to Postgres directly.
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: 'no'
+
+  postgres:
+    image: postgres:18.6-trixie
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set in .env}
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=${PG_SHARED_BUFFERS:-128MB}
+      - -c
+      - effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-384MB}
+      - -c
+      - log_min_duration_statement=250ms
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+    volumes: ['pgdata:/var/lib/postgresql']
+    shm_size: 256mb
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Thousands of client connections from app replicas multiplexed onto a
+  # small, fixed number of Postgres backends.
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.25.2-p0
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB}
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 5000
+      DEFAULT_POOL_SIZE: 40
+      RESERVE_POOL_SIZE: 10
+      SERVER_RESET_QUERY: ''
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -p 5432']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:8.6.7-alpine
+    restart: unless-stopped
+    # noeviction: seat holds and idempotency keys must never be silently
+    # dropped under memory pressure; failing writes loudly is safer.
+    command:
+      - redis-server
+      - --appendonly
+      - 'yes'
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-256mb}
+      - --maxmemory-policy
+      - noeviction
+    volumes: ['redisdata:/data']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 2s
+      retries: 10
+
+  redpanda:
+    image: redpandadata/redpanda:v26.2.3
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=${REDPANDA_MEMORY:-512M}
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --kafka-addr=internal://0.0.0.0:9092
+      - --advertise-kafka-addr=internal://redpanda:9092
+      - --default-log-level=warn
+    volumes: ['redpandadata:/var/lib/redpanda/data']
+    healthcheck:
+      test: ['CMD-SHELL', "rpk cluster health | grep -E 'Healthy:.+true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+volumes:
+  pgdata:
+  redisdata:
+  redpandadata:
