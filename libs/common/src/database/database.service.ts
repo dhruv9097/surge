@@ -37,21 +37,36 @@ export class DatabaseService implements OnApplicationShutdown {
   /**
    * Runs `fn` inside a transaction on a single connection. Rolls back on any
    * thrown error and always releases the connection.
+   *
+   * While checked out, a client's connection errors are emitted on the client
+   * itself, not the pool. Without a listener, a connection dropped while the
+   * transaction awaits other I/O (say, a Kafka send) would crash the process.
+   * Broken connections are destroyed instead of returned to the pool.
    */
   async transaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
+    let broken: Error | undefined;
+    const onError = (err: Error) => {
+      broken = err;
+      this.logger.warn({ err }, 'Connection lost during transaction');
+    };
+    client.on('error', onError);
     try {
       await client.query('BEGIN');
       const result = await fn(client);
       await client.query('COMMIT');
       return result;
     } catch (err) {
-      await client.query('ROLLBACK').catch((rollbackErr: unknown) => {
-        this.logger.error({ err: rollbackErr }, 'Rollback failed');
-      });
+      if (!broken) {
+        await client.query('ROLLBACK').catch((rollbackErr: unknown) => {
+          broken = rollbackErr instanceof Error ? rollbackErr : new Error(String(rollbackErr));
+          this.logger.error({ err: rollbackErr }, 'Rollback failed');
+        });
+      }
       throw err;
     } finally {
-      client.release();
+      client.off('error', onError);
+      client.release(broken);
     }
   }
 
