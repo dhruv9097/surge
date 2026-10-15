@@ -5,6 +5,6 @@
     "outDir": "dist"
   },
   "include": ["src"],
-  "exclude": ["src/**/*.spec.ts", "src/**/*.int-spec.ts"],
+  "exclude": ["src/**/*.spec.ts", "src/**/*.int-spec.ts", "src/test-support"],
   "references": [{ "path": "../../libs/common" }]
 }

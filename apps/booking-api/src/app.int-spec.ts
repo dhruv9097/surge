@@ -1,34 +1,20 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redis';
-import { createHttpApp, LifecycleService, loadConfig } from '@surge/common';
-import { AppModule } from './app.module.js';
-import { configSchema } from './config.js';
+import { LifecycleService } from '@surge/common';
+import { createTestApp } from './test-support/app.js';
+import { startInfra, type TestInfra } from './test-support/infra.js';
 
-describe('booking-api (integration)', () => {
-  let pg: StartedPostgreSqlContainer;
-  let redis: StartedRedisContainer;
+describe('booking-api platform (integration)', () => {
+  let infra: TestInfra;
   let app: NestFastifyApplication;
 
   beforeAll(async () => {
-    [pg, redis] = await Promise.all([
-      new PostgreSqlContainer('postgres:18.6-trixie').start(),
-      new RedisContainer('redis:8.6.7-alpine').start(),
-    ]);
-    const config = loadConfig(configSchema, {
-      NODE_ENV: 'test',
-      LOG_LEVEL: 'fatal',
-      DATABASE_URL: pg.getConnectionUri(),
-      REDIS_URL: redis.getConnectionUrl(),
-    });
-    app = await createHttpApp(AppModule.forRoot(config));
-    await app.init();
-    await app.getHttpAdapter().getInstance().ready();
+    infra = await startInfra();
+    app = await createTestApp(infra);
   });
 
   afterAll(async () => {
     await app?.close();
-    await Promise.all([pg?.stop(), redis?.stop()]);
+    await infra?.stop();
   });
 
   it('liveness does not depend on downstream services', async () => {

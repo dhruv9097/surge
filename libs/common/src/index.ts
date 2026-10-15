@@ -8,3 +8,5 @@ export * from './http/exception.filter.js';
 export * from './metrics/metrics.module.js';
 export * from './observability.module.js';
 export * from './redis/redis.module.js';
+export * from './http/api-error.js';
+export * from './http/zod-validation.pipe.js';

@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { ApiError } from './api-error.js';
 
 export interface ErrorBody {
   error: { code: string; message: string; requestId: string; details?: unknown };
@@ -30,15 +31,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
       const response = exception.getResponse();
-      // Validation errors carry a list of per-field messages; surface those,
+      // ApiError carries its own code and details. For framework exceptions,
+      // validation errors put per-field messages in `message`; surface those,
       // but don't echo a plain message that is already in `message`.
       const details =
-        typeof response === 'object' && response !== null && 'message' in response
-          ? response.message
-          : undefined;
+        exception instanceof ApiError
+          ? exception.details
+          : typeof response === 'object' && response !== null && 'message' in response
+            ? response.message
+            : undefined;
       const body: ErrorBody = {
         error: {
-          code: statusCode(status),
+          code: exception instanceof ApiError ? exception.code : statusCode(status),
           message: exception.message,
           requestId,
           ...(details !== undefined && details !== exception.message ? { details } : {}),
