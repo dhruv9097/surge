@@ -10,3 +10,4 @@ export * from './observability.module.js';
 export * from './redis/redis.module.js';
 export * from './http/api-error.js';
 export * from './http/zod-validation.pipe.js';
+export * from './messaging/events.js';

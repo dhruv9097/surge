@@ -1,11 +1,9 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import { ApiError, DatabaseService } from '@surge/common';
+import { ApiError, DatabaseService, type OrderCreatedEvent, Topics } from '@surge/common';
 import { DatabaseError, type PoolClient } from 'pg';
 import { Counter } from 'prom-client';
 import { EventsService } from '../events/events.service.js';
 import { InventoryService } from '../inventory/inventory.service.js';
-
-export const ORDERS_TOPIC = 'orders';
 
 export interface Order {
   orderId: string;
@@ -138,10 +136,20 @@ export class OrdersService {
       [o.eventId, seatIds, order.orderId],
     );
 
+    const event: OrderCreatedEvent = {
+      type: 'order.created',
+      orderId: order.orderId,
+      eventId: order.eventId,
+      userId: order.userId,
+      holdId: order.holdId,
+      seatIds: order.seatIds,
+      totalCents: order.totalCents,
+      createdAt: order.createdAt,
+    };
     await client.query(`INSERT INTO outbox (topic, key, payload) VALUES ($1, $2, $3)`, [
-      ORDERS_TOPIC,
+      Topics.ORDERS,
       order.orderId,
-      JSON.stringify({ type: 'order.created', ...order }),
+      JSON.stringify(event),
     ]);
     return order;
   }

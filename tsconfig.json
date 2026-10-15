@@ -1,4 +1,14 @@
 {
   "files": [],
-  "references": [{ "path": "libs/common" }, { "path": "apps/booking-api" }]
+  "references": [
+    {
+      "path": "libs/common"
+    },
+    {
+      "path": "apps/booking-api"
+    },
+    {
+      "path": "apps/worker"
+    }
+  ]
 }
