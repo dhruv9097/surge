@@ -1,6 +1,5 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import { ApiError, DatabaseService } from '@surge/common';
-import { TtlCache } from '../common/ttl-cache.js';
+import { ApiError, DatabaseService, TtlCache } from '@surge/common';
 
 export interface Seat {
   seatId: string;

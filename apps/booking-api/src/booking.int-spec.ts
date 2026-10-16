@@ -3,8 +3,8 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Redis } from 'ioredis';
 import pg from 'pg';
 import { inventoryKeys } from './inventory/inventory.scripts.js';
-import { buyer, createTestApp } from './test-support/app.js';
-import { seedEvent, startInfra, type TestInfra } from './test-support/infra.js';
+import { buyer, createTestApp, testTokens } from './test-support/app.js';
+import { seedEvent, startInfra, type TestInfra } from '@surge/testing';
 
 type Json = Record<string, unknown>;
 const errorCode = (res: { json: () => unknown }) => (res.json() as { error: Json }).error.code;
@@ -70,13 +70,33 @@ describe('booking flow (integration)', () => {
       expect(errorCode(await alice.hold(eventId, ['S-1', 'S-2', 'S-3']))).toBe('TOO_MANY_SEATS');
       expect(errorCode(await alice.hold(eventId, ['bad,id']))).toBe('VALIDATION_FAILED');
       expect(errorCode(await alice.hold(randomUUID(), ['S-1']))).toBe('EVENT_NOT_FOUND');
+    });
 
-      const anonymous = await app.inject({
-        method: 'POST',
-        url: `/events/${eventId}/holds`,
-        payload: { seatIds: ['S-1'] },
-      });
-      expect(errorCode(anonymous)).toBe('UNAUTHENTICATED');
+    it('requires a valid admission token for the event being bought', async () => {
+      const { eventId } = await seedEvent(infra.databaseUrl, 10);
+      const otherEventId = randomUUID();
+      const userId = randomUUID();
+      const holdWith = (authorization?: string) =>
+        app.inject({
+          method: 'POST',
+          url: `/events/${eventId}/holds`,
+          headers: authorization ? { authorization } : {},
+          payload: { seatIds: ['S-1'] },
+        });
+
+      expect(errorCode(await holdWith())).toBe('ADMISSION_REQUIRED');
+      expect(errorCode(await holdWith('Bearer not-a-token'))).toBe('ADMISSION_INVALID');
+
+      const expired = await testTokens.sign({ userId, eventId }, -60);
+      expect(errorCode(await holdWith(`Bearer ${expired.token}`))).toBe('ADMISSION_EXPIRED');
+
+      const elsewhere = await testTokens.sign({ userId, eventId: otherEventId }, 600);
+      const wrongEvent = await holdWith(`Bearer ${elsewhere.token}`);
+      expect(wrongEvent.statusCode).toBe(403);
+      expect(errorCode(wrongEvent)).toBe('ADMISSION_WRONG_EVENT');
+
+      const valid = await testTokens.sign({ userId, eventId }, 600);
+      expect((await holdWith(`Bearer ${valid.token}`)).statusCode).toBe(201);
     });
 
     it('refuses holds before the sale opens', async () => {
@@ -112,8 +132,8 @@ describe('booking flow (integration)', () => {
         totalCents: 10_000,
       });
 
-      expect((await alice.order(order.orderId as string)).json()).toEqual(order);
-      expect((await buyer(app).order(order.orderId as string)).statusCode).toBe(404);
+      expect((await alice.order(order.orderId as string, eventId)).json()).toEqual(order);
+      expect((await buyer(app).order(order.orderId as string, eventId)).statusCode).toBe(404);
 
       const availability = await app.inject({ url: `/events/${eventId}/availability` });
       expect(availability.json()).toMatchObject({
@@ -165,7 +185,9 @@ describe('booking flow (integration)', () => {
       const res = await app.inject({
         method: 'POST',
         url: `/events/${eventId}/holds/${holdId}/checkout`,
-        headers: { 'x-user-id': alice.userId },
+        headers: {
+          authorization: `Bearer ${(await testTokens.sign({ userId: alice.userId, eventId }, 600)).token}`,
+        },
       });
       expect(errorCode(res)).toBe('VALIDATION_FAILED');
     });

@@ -4,7 +4,7 @@ import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redi
 import { runner } from 'node-pg-migrate';
 import pg from 'pg';
 
-const MIGRATIONS_DIR = fileURLToPath(new URL('../../../../db/migrations', import.meta.url));
+const MIGRATIONS_DIR = fileURLToPath(new URL('../../../db/migrations', import.meta.url));
 
 export interface TestInfra {
   pg: StartedPostgreSqlContainer;

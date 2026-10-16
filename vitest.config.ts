@@ -7,6 +7,7 @@ const alias = {
     new URL('./libs/common/src/telemetry/index.ts', import.meta.url),
   ),
   '@surge/common': fileURLToPath(new URL('./libs/common/src/index.ts', import.meta.url)),
+  '@surge/testing': fileURLToPath(new URL('./libs/testing/src/index.ts', import.meta.url)),
 };
 
 export default defineConfig({

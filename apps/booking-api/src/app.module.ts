@@ -1,5 +1,12 @@
 import { DynamicModule, Module } from '@nestjs/common';
-import { DatabaseModule, HealthModule, ObservabilityModule, RedisModule } from '@surge/common';
+import {
+  AdmissionTokens,
+  DatabaseModule,
+  HealthModule,
+  ObservabilityModule,
+  RedisModule,
+} from '@surge/common';
+import { ADMISSION_TOKENS, AdmissionGuard } from './common/admission.guard.js';
 import { APP_CONFIG, type Config } from './config.js';
 import { EventsController } from './events/events.controller.js';
 import { EventsService } from './events/events.service.js';
@@ -22,6 +29,11 @@ export class AppModule {
       controllers: [EventsController, HoldsController, OrdersController],
       providers: [
         { provide: APP_CONFIG, useValue: config },
+        {
+          provide: ADMISSION_TOKENS,
+          useFactory: () => new AdmissionTokens(config.ADMISSION_TOKEN_SECRET),
+        },
+        AdmissionGuard,
         EventsService,
         InventoryService,
         OrdersService,

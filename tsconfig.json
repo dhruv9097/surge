@@ -9,6 +9,9 @@
     },
     {
       "path": "apps/worker"
+    },
+    {
+      "path": "apps/waiting-room"
     }
   ]
 }

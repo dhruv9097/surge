@@ -1,8 +1,8 @@
-import { Controller, Get, Headers, HttpStatus, Param, Post, Res } from '@nestjs/common';
-import { ZodValidationPipe } from '@surge/common';
+import { Controller, Get, Headers, HttpStatus, Param, Post, Res, UseGuards } from '@nestjs/common';
+import { type Admission, ZodValidationPipe } from '@surge/common';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { CurrentUser } from '../common/current-user.js';
+import { Admitted, AdmissionGuard } from '../common/admission.guard.js';
 import { OrdersService } from './orders.service.js';
 
 const uuidPipe = new ZodValidationPipe(z.uuid());
@@ -14,6 +14,7 @@ const idempotencyKeyPipe = new ZodValidationPipe(
 );
 
 @Controller()
+@UseGuards(AdmissionGuard)
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
@@ -26,7 +27,7 @@ export class OrdersController {
     @Param('eventId', uuidPipe) eventId: string,
     @Param('holdId', uuidPipe) holdId: string,
     @Headers('idempotency-key') rawIdempotencyKey: unknown,
-    @CurrentUser() userId: string,
+    @Admitted() { userId }: Admission,
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     const idempotencyKey = idempotencyKeyPipe.transform(rawIdempotencyKey);
@@ -36,7 +37,7 @@ export class OrdersController {
   }
 
   @Get('orders/:orderId')
-  get(@Param('orderId', uuidPipe) orderId: string, @CurrentUser() userId: string) {
+  get(@Param('orderId', uuidPipe) orderId: string, @Admitted() { userId }: Admission) {
     return this.orders.getForUser(orderId, userId);
   }
 }

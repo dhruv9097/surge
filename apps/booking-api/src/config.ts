@@ -1,4 +1,5 @@
 import {
+  admissionConfigSchema,
   baseConfigSchema,
   databaseConfigSchema,
   loadConfig,
@@ -10,6 +11,7 @@ export const configSchema = baseConfigSchema
   .extend({ SERVICE_NAME: baseConfigSchema.shape.SERVICE_NAME.default('booking-api') })
   .extend(databaseConfigSchema.shape)
   .extend(redisConfigSchema.shape)
+  .extend(admissionConfigSchema.shape)
   .extend({
     // How long seats stay reserved while a buyer checks out.
     HOLD_TTL_MS: z.coerce

@@ -11,7 +11,8 @@
     "types": ["node", "vitest/globals"],
     "paths": {
       "@surge/common": ["./libs/common/src/index.ts"],
-      "@surge/common/telemetry": ["./libs/common/src/telemetry/index.ts"]
+      "@surge/common/telemetry": ["./libs/common/src/telemetry/index.ts"],
+      "@surge/testing": ["./libs/testing/src/index.ts"]
     }
   },
   "include": ["apps/*/src", "libs/*/src", "vitest.config.ts"]

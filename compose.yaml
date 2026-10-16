@@ -12,6 +12,7 @@ x-node-service: &node-service
 
 x-app-env: &app-env
   NODE_ENV: production
+  ADMISSION_TOKEN_SECRET: ${ADMISSION_TOKEN_SECRET:?set in .env (openssl rand -hex 32)}
   LOG_LEVEL: ${LOG_LEVEL:-info}
   DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
   REDIS_URL: redis://redis:6379
@@ -29,6 +30,7 @@ services:
       nofile: { soft: 65535, hard: 65535 }
     depends_on:
       booking-api: { condition: service_healthy }
+      waiting-room: { condition: service_healthy }
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1/nginx-health']
       interval: 10s
@@ -51,6 +53,36 @@ services:
       replicas: ${BOOKING_API_REPLICAS:-1}
       resources:
         limits: { cpus: '1.0', memory: '${BOOKING_API_MEMORY:-384M}' }
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/health/ready').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+      interval: 5s
+      timeout: 2s
+      retries: 3
+      start_period: 10s
+
+  # Virtual queue in front of the booking API. Stateless: all queue state is
+  # in Redis, so replicas can be added freely.
+  waiting-room:
+    <<: *node-service
+    build: { context: ., target: runtime, args: { APP: waiting-room } }
+    image: surge/waiting-room:${IMAGE_TAG:-local}
+    environment:
+      <<: *app-env
+      SERVICE_NAME: waiting-room
+      ADMIT_RATE_PER_SECOND: ${ADMIT_RATE_PER_SECOND:-50}
+      NODE_OPTIONS: --max-old-space-size=${WAITING_ROOM_HEAP_MB:-192}
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      pgbouncer: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    deploy:
+      replicas: ${WAITING_ROOM_REPLICAS:-1}
+      resources:
+        limits: { cpus: '1.0', memory: '${WAITING_ROOM_MEMORY:-256M}' }
     healthcheck:
       test:
         - CMD

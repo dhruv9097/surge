@@ -1,7 +1,7 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { LifecycleService } from '@surge/common';
 import { createTestApp } from './test-support/app.js';
-import { startInfra, type TestInfra } from './test-support/infra.js';
+import { startInfra, type TestInfra } from '@surge/testing';
 
 describe('booking-api platform (integration)', () => {
   let infra: TestInfra;

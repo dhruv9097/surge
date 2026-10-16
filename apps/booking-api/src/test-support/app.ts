@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
-import { createHttpApp, loadConfig } from '@surge/common';
+import { AdmissionTokens, createHttpApp, loadConfig } from '@surge/common';
 import { AppModule } from '../app.module.js';
 import { configSchema } from '../config.js';
-import type { TestInfra } from './infra.js';
+import type { TestInfra } from '@surge/testing';
+
+export const TEST_ADMISSION_SECRET = 'test-admission-secret-of-at-least-32-chars';
+export const testTokens = new AdmissionTokens(TEST_ADMISSION_SECRET);
 
 export async function createTestApp(
   infra: TestInfra,
@@ -14,6 +17,7 @@ export async function createTestApp(
     LOG_LEVEL: 'fatal',
     DATABASE_URL: infra.databaseUrl,
     REDIS_URL: infra.redisUrl,
+    ADMISSION_TOKEN_SECRET: TEST_ADMISSION_SECRET,
     ...env,
   });
   const app = await createHttpApp(AppModule.forRoot(config));
@@ -22,26 +26,36 @@ export async function createTestApp(
   return app;
 }
 
-/** A buyer with their own identity, talking to the API in-process. */
+/**
+ * A buyer the waiting room has admitted, talking to the API in-process.
+ * Each request carries a fresh admission token for the event it targets.
+ */
 export function buyer(app: NestFastifyApplication, userId: string = randomUUID()) {
-  const headers = { 'x-user-id': userId };
+  const auth = async (eventId: string) => ({
+    authorization: `Bearer ${(await testTokens.sign({ userId, eventId }, 600)).token}`,
+  });
   return {
     userId,
-    hold: (eventId: string, seatIds: string[]) =>
+    hold: async (eventId: string, seatIds: string[]) =>
       app.inject({
         method: 'POST',
         url: `/events/${eventId}/holds`,
-        headers,
+        headers: await auth(eventId),
         payload: { seatIds },
       }),
-    release: (eventId: string, holdId: string) =>
-      app.inject({ method: 'DELETE', url: `/events/${eventId}/holds/${holdId}`, headers }),
-    checkout: (eventId: string, holdId: string, idempotencyKey: string = randomUUID()) =>
+    release: async (eventId: string, holdId: string) =>
+      app.inject({
+        method: 'DELETE',
+        url: `/events/${eventId}/holds/${holdId}`,
+        headers: await auth(eventId),
+      }),
+    checkout: async (eventId: string, holdId: string, idempotencyKey: string = randomUUID()) =>
       app.inject({
         method: 'POST',
         url: `/events/${eventId}/holds/${holdId}/checkout`,
-        headers: { ...headers, 'idempotency-key': idempotencyKey },
+        headers: { ...(await auth(eventId)), 'idempotency-key': idempotencyKey },
       }),
-    order: (orderId: string) => app.inject({ method: 'GET', url: `/orders/${orderId}`, headers }),
+    order: async (orderId: string, eventId: string) =>
+      app.inject({ method: 'GET', url: `/orders/${orderId}`, headers: await auth(eventId) }),
   };
 }

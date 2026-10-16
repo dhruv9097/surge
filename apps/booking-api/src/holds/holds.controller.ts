@@ -8,10 +8,11 @@ import {
   Inject,
   Param,
   Post,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiError, ZodValidationPipe } from '@surge/common';
+import { type Admission, ApiError, ZodValidationPipe } from '@surge/common';
 import { z } from 'zod';
-import { CurrentUser } from '../common/current-user.js';
+import { Admitted, AdmissionGuard } from '../common/admission.guard.js';
 import { APP_CONFIG, type Config } from '../config.js';
 import { EventsService } from '../events/events.service.js';
 import { InventoryService } from '../inventory/inventory.service.js';
@@ -28,6 +29,7 @@ const createHoldSchema = z.object({
 });
 
 @Controller('events/:eventId/holds')
+@UseGuards(AdmissionGuard)
 export class HoldsController {
   constructor(
     private readonly events: EventsService,
@@ -40,7 +42,7 @@ export class HoldsController {
   async create(
     @Param('eventId', uuidPipe) eventId: string,
     @Body(new ZodValidationPipe(createHoldSchema)) body: z.infer<typeof createHoldSchema>,
-    @CurrentUser() userId: string,
+    @Admitted() { userId }: Admission,
   ) {
     const event = await this.events.get(eventId);
     if (Date.now() < Date.parse(event.saleOpensAt)) {
@@ -96,7 +98,7 @@ export class HoldsController {
   async release(
     @Param('eventId', uuidPipe) eventId: string,
     @Param('holdId', uuidPipe) holdId: string,
-    @CurrentUser() userId: string,
+    @Admitted() { userId }: Admission,
   ) {
     if (!(await this.inventory.release(eventId, userId, holdId))) {
       throw new ApiError(HttpStatus.NOT_FOUND, 'HOLD_NOT_FOUND', 'Hold not found or expired');
